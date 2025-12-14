@@ -1,0 +1,14 @@
+[project]
+name = "skel-project"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "chumpy @ git+https://github.com/MarilynKeller/chumpy",
+  "aitviewer @ git+https://github.com/MarilynKeller/aitviewer",
+  "PyQt5==5.15.11; sys_platform == 'win32'",
+  "PyQt5-Qt5==5.15.2; sys_platform == 'win32'",
+  "PyQt5-sip==12.17.0; sys_platform == 'win32'",
+]
+
+[tool.uv.extra-build-dependencies]
+chumpy = ["pip"]
