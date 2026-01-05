@@ -106,6 +106,9 @@ def main():
                        help='Gender')
     parser.add_argument('--export_meshes', action='store_true',
                        help='Export mesh files to output/body_shapes/')
+    parser.add_argument('--subdivide', type=int, default=0, choices=[0, 1, 2, 3],
+                       help='Subdivision level for exported meshes (0=no subdivision, 1-3=finer detail). '
+                            'Each level ~4x more faces. Recommended: 1 or 2')
     parser.add_argument('--visualize', action='store_true',
                        help='Visualize in AITViewer (requires GUI)')
     parser.add_argument('--custom_height', type=float, default=None,
@@ -155,6 +158,19 @@ def main():
                 faces=skel.skel_f.cpu().numpy()
             )
 
+            # Apply subdivision if requested
+            if args.subdivide > 0:
+                print(f'\nApplying Loop subdivision (level {args.subdivide})...')
+                print(f'  Original skin mesh: {len(skin_mesh.faces):,} faces')
+                for _ in range(args.subdivide):
+                    skin_mesh = skin_mesh.subdivide_loop()
+                print(f'  Subdivided skin mesh: {len(skin_mesh.faces):,} faces')
+
+                print(f'  Original skeleton mesh: {len(skel_mesh.faces):,} faces')
+                for _ in range(args.subdivide):
+                    skel_mesh = skel_mesh.subdivide_loop()
+                print(f'  Subdivided skeleton mesh: {len(skel_mesh.faces):,} faces')
+
             skin_mesh.export(skin_path)
             skel_mesh.export(skel_path)
             print(f'\nMeshes saved to {output_dir}/')
@@ -192,11 +208,20 @@ def main():
                     faces=skel.skel_f.cpu().numpy()
                 )
 
+                # Apply subdivision if requested
+                if args.subdivide > 0:
+                    for _ in range(args.subdivide):
+                        skin_mesh = skin_mesh.subdivide_loop()
+                        skel_mesh = skel_mesh.subdivide_loop()
+
                 skin_mesh.export(skin_path)
                 skel_mesh.export(skel_path)
 
         if args.export_meshes:
-            print(f'\nAll meshes saved to output/body_shapes/')
+            if args.subdivide > 0:
+                print(f'\nAll meshes exported with Loop subdivision level {args.subdivide} to output/body_shapes/')
+            else:
+                print(f'\nAll meshes saved to output/body_shapes/')
 
     # Visualize (if requested)
     if args.visualize:
