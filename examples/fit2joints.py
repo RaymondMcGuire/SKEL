@@ -12,7 +12,16 @@ from skel.utils import location_to_spheres
 import torch
 from skel.skel_model import SKEL
 from tqdm import trange
-from psbody.mesh import Mesh, MeshViewer
+import os
+
+# Optional import for visualization (not available on Windows)
+try:
+    from psbody.mesh import Mesh, MeshViewer
+    PSBODY_AVAILABLE = True
+except ImportError:
+    PSBODY_AVAILABLE = False
+    print("Warning: psbody.mesh not available. Visualization will be disabled.")
+    import trimesh
 
 def optim(params, 
           poses,
@@ -31,30 +40,35 @@ def optim(params,
           pose_reg_factor = 1e1,
           ):
     
-    
+
         optimizer = torch.optim.LBFGS(params, lr=lr, max_iter=max_iter, line_search_fn=line_search_fn)
         pbar = trange(num_steps, leave=False)
-        mv = MeshViewer(keepalive=True)
-        
+
+        if PSBODY_AVAILABLE:
+            mv = MeshViewer(keepalive=True)
+        else:
+            mv = None
+
 
         def closure():
             optimizer.zero_grad()
-            
-            # Visualization
-            fi = watch_frame #frame of the batch to display
-            output = skel_model.forward(poses=poses[fi:fi+1], 
-                                        betas=betas[fi:fi+1], 
-                                        trans=trans[fi:fi+1], 
-                                        poses_type='skel', 
-                                        skelmesh=True)
-            meshes_to_display = [Mesh(v=output.skin_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
-                    + [Mesh(v=output.skin_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
-                    + [Mesh(v=output.skel_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
-                    + location_to_spheres(output.joints.detach().cpu().numpy()[fi], color=(1,0,0), radius=0.02) \
-                    + location_to_spheres(target_joints.detach().cpu().numpy()[fi], color=(0,1,0), radius=0.02) # The joints we want to match are in green
-                    # + [Mesh(v=output.skel_verts[fi].detach().cpu().numpy(), f=skel_model.skel_f.cpu().numpy(), vc='white')] \
-            mv.set_dynamic_meshes(meshes_to_display)
-            # import ipdb; ipdb.set_trace()
+
+            # Visualization (only if psbody is available)
+            if PSBODY_AVAILABLE:
+                fi = watch_frame #frame of the batch to display
+                output = skel_model.forward(poses=poses[fi:fi+1],
+                                            betas=betas[fi:fi+1],
+                                            trans=trans[fi:fi+1],
+                                            poses_type='skel',
+                                            skelmesh=True)
+                meshes_to_display = [Mesh(v=output.skin_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
+                        + [Mesh(v=output.skin_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
+                        + [Mesh(v=output.skel_verts[fi].detach().cpu().numpy(), f=[], vc='white')] \
+                        + location_to_spheres(output.joints.detach().cpu().numpy()[fi], color=(1,0,0), radius=0.02) \
+                        + location_to_spheres(target_joints.detach().cpu().numpy()[fi], color=(0,1,0), radius=0.02) # The joints we want to match are in green
+                        # + [Mesh(v=output.skel_verts[fi].detach().cpu().numpy(), f=skel_model.skel_f.cpu().numpy(), vc='white')] \
+                mv.set_dynamic_meshes(meshes_to_display)
+                # import ipdb; ipdb.set_trace()
 
           
             # Only optimize the global rotation of the SKEL model
@@ -216,15 +230,24 @@ if __name__ == "__main__":
         rot_only=False)
 
     optimized_skel_output = skel_model(pose, betas, trans)
-    optimized_skin_mesh = Mesh(v=optimized_skel_output.skin_verts.detach().cpu().numpy()[0], f=skel_model.skin_f.cpu().numpy())
-    optimized_skin_mesh.show()
 
-    # Save the skin mesh as a .ply file
-   
+    # Save the skin mesh
     if socket.gethostname() == 'ps019':
         skin_mesh_dst="/home/mkeller2/data2/Code/myo_SKEL/assets/skin.obj"
     else:
+        os.makedirs("./output", exist_ok=True)
         skin_mesh_dst="./output/SKEL.obj"
 
-    optimized_skin_mesh.write_obj(skin_mesh_dst)
+    if PSBODY_AVAILABLE:
+        optimized_skin_mesh = Mesh(v=optimized_skel_output.skin_verts.detach().cpu().numpy()[0], f=skel_model.skin_f.cpu().numpy())
+        optimized_skin_mesh.show()
+        optimized_skin_mesh.write_obj(skin_mesh_dst)
+    else:
+        # Use trimesh as fallback
+        optimized_skin_mesh = trimesh.Trimesh(
+            vertices=optimized_skel_output.skin_verts.detach().cpu().numpy()[0],
+            faces=skel_model.skin_f.cpu().numpy()
+        )
+        optimized_skin_mesh.export(skin_mesh_dst)
+
     print(f"Optimized mesh saved at {skin_mesh_dst}")

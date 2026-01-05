@@ -17,7 +17,17 @@ import torch
 from tqdm import trange
 import smplx
 import torch.nn.functional as F
-from psbody.mesh import Mesh, MeshViewer, MeshViewers
+
+# Optional import for visualization (not available on Windows)
+try:
+    from psbody.mesh import Mesh, MeshViewer, MeshViewers
+    PSBODY_AVAILABLE = True
+except ImportError:
+    PSBODY_AVAILABLE = False
+    print("Warning: psbody.mesh not available. Visualization will be disabled.")
+    if 'DISABLE_VIEWER' not in os.environ:
+        os.environ['DISABLE_VIEWER'] = '1'
+
 import skel.config as cg
 from skel.skel_model import SKEL
 import omegaconf 
@@ -389,29 +399,29 @@ class SkelFitter(object):
 
     def _fstep_plot(self, output, cfg, verts, anat_joints):
         "Function to plot each step"
-        
-        if('DISABLE_VIEWER' in os.environ):
+
+        if('DISABLE_VIEWER' in os.environ) or not PSBODY_AVAILABLE:
             return
-        
-        pose_mask, verts_mask, joint_mask = self._get_masks(cfg) 
-            
+
+        pose_mask, verts_mask, joint_mask = self._get_masks(cfg)
+
         skin_err_value = ((output.skin_verts[0] - verts[0])**2).sum(dim=-1).sqrt()
         skin_err_value = skin_err_value / 0.05
         skin_err_value = to_numpy(skin_err_value)
-            
+
         skin_mesh = Mesh(v=to_numpy(output.skin_verts[0]), f=[], vc='white')
         skel_mesh = Mesh(v=to_numpy(output.skel_verts[0]), f=self.skel.skel_f.cpu().numpy(), vc='white')
-        
+
         # Display vertex distance on SMPL
         smpl_verts = to_numpy(verts[0])
         smpl_mesh = Mesh(v=smpl_verts, f=self.smpl.faces)
-        smpl_mesh.set_vertex_colors_from_weights(skin_err_value, scale_to_range_1=False)       
-        
+        smpl_mesh.set_vertex_colors_from_weights(skin_err_value, scale_to_range_1=False)
+
         smpl_mesh_masked = Mesh(v=smpl_verts[to_numpy(verts_mask[0,:,0])], f=[], vc='green')
         smpl_mesh_pc = Mesh(v=smpl_verts, f=[], vc='green')
-        
+
         skin_mesh_err = Mesh(v=to_numpy(output.skin_verts[0]), f=self.skel.skin_f.cpu().numpy(), vc='white')
-        skin_mesh_err.set_vertex_colors_from_weights(skin_err_value, scale_to_range_1=False) 
+        skin_mesh_err.set_vertex_colors_from_weights(skin_err_value, scale_to_range_1=False)
         # List the meshes to display
         meshes_left = [skin_mesh_err, smpl_mesh_pc, skel_mesh]
         meshes_right = [smpl_mesh_masked, skin_mesh, skel_mesh]
@@ -420,7 +430,7 @@ class SkelFitter(object):
             # Plot the joints
             meshes_right += location_to_spheres(to_numpy(output.joints[joint_mask[:,:,0]]), color=(1,0,0), radius=0.02)
             meshes_right += location_to_spheres(to_numpy(anat_joints[joint_mask[:,:,0]]), color=(0,1,0), radius=0.02) \
-                
+
 
         self.mv[0][0].set_dynamic_meshes(meshes_left)
         self.mv[0][1].set_dynamic_meshes(meshes_right)

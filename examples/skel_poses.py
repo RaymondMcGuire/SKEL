@@ -131,15 +131,30 @@ if __name__ == '__main__':
                             )
     
     if args.export_mesh:
-        from psbody.mesh import Mesh
+        try:
+            from psbody.mesh import Mesh
+            use_psbody = True
+        except ImportError:
+            print("Warning: psbody.mesh not available. Using trimesh for export instead.")
+            use_psbody = False
+
         import tqdm
         print('exporting meshes')
         os.makedirs(args.export_mesh, exist_ok=True)
-        for frame_i in tqdm.tqdm(range(skel_seq.poses_body.shape[0])):
-            skel_mesh = Mesh(skel_seq.skel_vertices[frame_i], skel_seq.skel_faces)
-            skin_mesh = Mesh(skel_seq.skin_vertices[frame_i], skel_seq.skin_faces)
-            skel_mesh.write_ply(os.path.join(args.export_mesh, f'skel_{frame_i}.ply'))
-            skin_mesh.write_ply(os.path.join(args.export_mesh, f'skin_{frame_i}.ply'))
+
+        if use_psbody:
+            for frame_i in tqdm.tqdm(range(skel_seq.poses_body.shape[0])):
+                skel_mesh = Mesh(skel_seq.skel_vertices[frame_i], skel_seq.skel_faces)
+                skin_mesh = Mesh(skel_seq.skin_vertices[frame_i], skel_seq.skin_faces)
+                skel_mesh.write_ply(os.path.join(args.export_mesh, f'skel_{frame_i}.ply'))
+                skin_mesh.write_ply(os.path.join(args.export_mesh, f'skin_{frame_i}.ply'))
+        else:
+            import trimesh
+            for frame_i in tqdm.tqdm(range(skel_seq.poses_body.shape[0])):
+                skel_mesh = trimesh.Trimesh(vertices=skel_seq.skel_vertices[frame_i], faces=skel_seq.skel_faces)
+                skin_mesh = trimesh.Trimesh(vertices=skel_seq.skin_vertices[frame_i], faces=skel_seq.skin_faces)
+                skel_mesh.export(os.path.join(args.export_mesh, f'skel_{frame_i}.ply'))
+                skin_mesh.export(os.path.join(args.export_mesh, f'skin_{frame_i}.ply'))
 
     v = Viewer()
     v.playback_fps = fps
