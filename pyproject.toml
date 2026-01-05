@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "skel-project"
-version = "0.0.0"
+name = "skel"
+version = "1.0.0"
 requires-python = ">=3.12"
 dependencies = [
   "chumpy @ git+https://github.com/MarilynKeller/chumpy",
@@ -8,7 +12,16 @@ dependencies = [
   "PyQt5==5.15.11; sys_platform == 'win32'",
   "PyQt5-Qt5==5.15.2; sys_platform == 'win32'",
   "PyQt5-sip==12.17.0; sys_platform == 'win32'",
+  "torch>=1.6.0",
+  "smplx",
+  "trimesh",
+  "tqdm",
+  "matplotlib",
+  "moderngl-window==2.4.6",
 ]
+
+[tool.setuptools.packages.find]
+include = ["skel*"]
 
 [tool.uv.extra-build-dependencies]
 chumpy = ["pip"]
