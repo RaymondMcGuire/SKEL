@@ -421,14 +421,18 @@ def location_to_spheres(loc, color=(1,0,0), radius=0.02):
         radius (float, optional): Radius of the spheres in meters. Defaults to 0.02.
 
     Returns:
-        list: List of spheres Mesh
+        list: List of spheres Mesh (empty list if psbody not available)
     """
-    from psbody.mesh.sphere import Sphere
-    import numpy as np
-    cL = [Sphere(np.asarray([loc[i, 0], loc[i, 1], loc[i, 2]]), radius).to_mesh() for i in range(loc.shape[0])]
-    for spL in cL:
-        spL.set_vertex_colors(np.array(color)) 
-    return cL
+    try:
+        from psbody.mesh.sphere import Sphere
+        import numpy as np
+        cL = [Sphere(np.asarray([loc[i, 0], loc[i, 1], loc[i, 2]]), radius).to_mesh() for i in range(loc.shape[0])]
+        for spL in cL:
+            spL.set_vertex_colors(np.array(color))
+        return cL
+    except ImportError:
+        # Return empty list if psbody not available (visualization disabled)
+        return []
 
 def sparce_coo_matrix2tensor(arr_coo, make_dense=False):
     assert isinstance(arr_coo, scipy.sparse._coo.coo_matrix), f"arr_coo should be a coo_matrix, got {type(arr_coo)}. Please download the updated SKEL pkl files from https://skel.is.tue.mpg.de/."

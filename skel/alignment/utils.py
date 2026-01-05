@@ -3,7 +3,14 @@ import os
 import pickle
 import torch
 import numpy as np
-from psbody.mesh.sphere import Sphere
+
+# Optional import for visualization (not available on Windows)
+try:
+    from psbody.mesh.sphere import Sphere
+    PSBODY_AVAILABLE = True
+except ImportError:
+    PSBODY_AVAILABLE = False
+    Sphere = None
 
 # to_params = lambda x: torch.from_numpy(x).float().to(self.device).requires_grad_(True)
 # to_torch = lambda x: torch.from_numpy(x).float().to(self.device)
@@ -122,10 +129,14 @@ def location_to_spheres(loc, color=(1,0,0), radius=0.02):
         radius (float, optional): Radius of the spheres in meters. Defaults to 0.02.
 
     Returns:
-        list: List of spheres Mesh
+        list: List of spheres Mesh (empty list if psbody not available)
     """
+
+    if not PSBODY_AVAILABLE:
+        # Return empty list if psbody not available (visualization disabled)
+        return []
 
     cL = [Sphere(np.asarray([loc[i, 0], loc[i, 1], loc[i, 2]]), radius).to_mesh() for i in range(loc.shape[0])]
     for spL in cL:
-        spL.set_vertex_colors(np.array(color)) 
+        spL.set_vertex_colors(np.array(color))
     return cL
