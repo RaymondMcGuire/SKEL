@@ -5,8 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skel"
 version = "1.0.0"
+description = "SKEL model Loader."
+authors = [{name = "Marilyn Keller"}]
+readme = "README.md"
 requires-python = ">=3.12"
+keywords = [
+    "motion",
+    "machine learning",
+    "sequences",
+    "smpl",
+    "computer graphics",
+    "computer vision",
+    "3D",
+    "meshes",
+    "skel",
+]
 dependencies = [
+  "wheel",
   "chumpy @ git+https://github.com/MarilynKeller/chumpy",
   "aitviewer @ git+https://github.com/MarilynKeller/aitviewer",
   "PyQt5==5.15.11; sys_platform == 'win32'",
@@ -19,6 +34,9 @@ dependencies = [
   "matplotlib",
   "moderngl-window==2.4.6",
 ]
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["skel*"]
