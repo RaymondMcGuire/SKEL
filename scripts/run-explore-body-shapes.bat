@@ -1,0 +1,36 @@
+@echo off
+cd ..
+
+REM ============================================================
+REM Explore SKEL Body Shape Parameters
+REM Uncomment one line below to run different configurations
+REM ============================================================
+
+REM Option 1: Show all predefined body shapes (no export)
+uv run python examples/explore_body_shape.py --gender female
+
+REM Option 2: Export all predefined body shapes as meshes
+REM uv run python examples/explore_body_shape.py --gender female --export_meshes
+
+REM Option 3: Male body shapes
+REM uv run python examples/explore_body_shape.py --gender male --export_meshes
+
+REM Option 4: Generate 60kg body (average weight, beta[1]=0.0)
+REM uv run python examples/explore_body_shape.py --gender female --custom_weight 0.0 --export_meshes
+
+REM Option 5: Generate 100kg body (heavy, beta[1]=1.8)
+REM uv run python examples/explore_body_shape.py --gender female --custom_weight 1.8 --export_meshes
+
+REM Option 6: Generate 130kg body (very heavy, beta[1]=2.0)
+REM uv run python examples/explore_body_shape.py --gender female --custom_weight 2.0 --export_meshes
+
+REM Option 7: Generate tall heavy person (height=1.5, weight=2.0)
+REM uv run python examples/explore_body_shape.py --gender female --custom_height 1.5 --custom_weight 2.0 --export_meshes
+
+REM Option 8: Generate short thin person (height=-1.5, weight=-2.0)
+REM uv run python examples/explore_body_shape.py --gender female --custom_height -1.5 --custom_weight -2.0 --export_meshes
+
+REM Option 9: Visualize in AITViewer (requires GUI)
+REM uv run python examples/explore_body_shape.py --gender female --visualize
+
+pause
