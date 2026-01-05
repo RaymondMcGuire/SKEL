@@ -20,21 +20,23 @@ import numpy as np
 
 # Predefined body shape configurations
 # Format: (name, beta[0](height), beta[1](weight), description)
+# NOTE: Based on empirical testing, NEGATIVE beta values correspond to LARGER body mass
+#       Positive beta → thinner/lighter body, Negative beta → heavier/larger body
 BODY_SHAPES = {
-    'very_thin_short': (-1.5, -2.0, 'Very thin & short (~45kg, ~155cm)'),
-    'thin_short': (-1.0, -1.5, 'Thin & short (~50kg, ~160cm)'),
+    'very_thin_short': (-1.5, 2.0, 'Very thin & short (~45kg, ~155cm)'),
+    'thin_short': (-1.0, 1.5, 'Thin & short (~50kg, ~160cm)'),
     'average_short': (-1.0, 0.0, 'Average weight, short (~60kg, ~160cm)'),
 
-    'very_thin_avg': (0.0, -2.0, 'Very thin, average height (~45kg, ~165cm)'),
-    'thin_avg': (0.0, -1.0, 'Thin, average height (~55kg, ~165cm)'),
+    'very_thin_avg': (0.0, 2.0, 'Very thin, average height (~45kg, ~165cm)'),
+    'thin_avg': (0.0, 1.0, 'Thin, average height (~55kg, ~165cm)'),
     'average': (0.0, 0.0, 'Average body type (default, ~60kg, ~165cm)'),
-    'heavy_avg': (0.0, 1.0, 'Heavy, average height (~80kg, ~165cm)'),
-    'very_heavy_avg': (0.0, 2.0, 'Very heavy, average height (~100-120kg, ~165cm)'),
+    'heavy_avg': (0.0, -1.0, 'Heavy, average height (~80kg, ~165cm)'),
+    'very_heavy_avg': (0.0, -2.0, 'Very heavy, average height (~100-120kg, ~165cm)'),
 
-    'thin_tall': (1.5, -1.0, 'Thin & tall (~60kg, ~175cm)'),
+    'thin_tall': (1.5, 1.0, 'Thin & tall (~60kg, ~175cm)'),
     'average_tall': (1.5, 0.0, 'Average weight, tall (~70kg, ~175cm)'),
-    'heavy_tall': (1.5, 1.0, 'Heavy & tall (~90kg, ~175cm)'),
-    'very_heavy_tall': (1.5, 2.0, 'Very heavy & tall (~110-130kg, ~175cm)'),
+    'heavy_tall': (1.5, -1.0, 'Heavy & tall (~90kg, ~175cm)'),
+    'very_heavy_tall': (1.5, -2.0, 'Very heavy & tall (~110-130kg, ~175cm)'),
 }
 
 def create_body_with_shape(skel_model, beta_height, beta_weight, device='cpu'):
