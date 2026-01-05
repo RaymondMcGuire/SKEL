@@ -15,6 +15,7 @@ import argparse
 import os
 import torch
 from skel.skel_model import SKEL
+from skel.kin_skel import skel_joints_name
 import trimesh
 import numpy as np
 
@@ -67,6 +68,67 @@ def create_body_with_shape(skel_model, beta_height, beta_weight, device='cpu'):
 
     return skel_output, betas
 
+def separate_skeleton_by_bone(skel_model, skel_output):
+    """
+    Separate skeleton mesh into individual bone meshes based on skinning weights
+
+    Args:
+        skel_model: SKEL model instance
+        skel_output: SKEL model output
+
+    Returns:
+        dict: Dictionary of {bone_name: trimesh.Trimesh} for each bone
+    """
+    skel_verts = skel_output.skel_verts[0].cpu().numpy()  # (Nk, 3)
+    skel_faces = skel_model.skel_f.cpu().numpy()  # (Nf, 3)
+
+    # Get skinning weights (Nk vertices x Nj joints)
+    skel_weights = skel_model.skel_weights.to_dense().cpu().numpy()  # (Nk, Nj)
+
+    # For each vertex, find the joint with maximum weight
+    vertex_to_joint = np.argmax(skel_weights, axis=1)  # (Nk,)
+
+    bone_meshes = {}
+    num_joints = len(skel_joints_name)
+
+    for joint_idx in range(num_joints):
+        bone_name = skel_joints_name[joint_idx]
+
+        # Find vertices belonging to this bone
+        bone_vert_mask = (vertex_to_joint == joint_idx)
+        bone_vert_indices = np.where(bone_vert_mask)[0]
+
+        if len(bone_vert_indices) == 0:
+            continue  # Skip bones with no vertices
+
+        # Find faces where all three vertices belong to this bone
+        face_belongs_to_bone = np.all(bone_vert_mask[skel_faces], axis=1)
+        bone_faces = skel_faces[face_belongs_to_bone]
+
+        if len(bone_faces) == 0:
+            continue  # Skip if no complete faces for this bone
+
+        # Create vertex index mapping (old index -> new index)
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(bone_vert_indices)}
+
+        # Remap face indices to local vertex indices
+        bone_faces_remapped = np.vectorize(old_to_new.get)(bone_faces)
+        bone_verts = skel_verts[bone_vert_indices]
+
+        # Create mesh for this bone
+        try:
+            bone_mesh = trimesh.Trimesh(
+                vertices=bone_verts,
+                faces=bone_faces_remapped,
+                process=False  # Don't merge vertices or clean up
+            )
+            bone_meshes[bone_name] = bone_mesh
+        except:
+            # Skip if mesh creation fails
+            continue
+
+    return bone_meshes
+
 def estimate_body_measurements(skel_output):
     """
     Estimate body measurements (height, arm span, etc.)
@@ -109,6 +171,8 @@ def main():
     parser.add_argument('--subdivide', type=int, default=0, choices=[0, 1, 2, 3],
                        help='Subdivision level for exported meshes (0=no subdivision, 1-3=finer detail). '
                             'Each level ~4x more faces. Recommended: 1 or 2')
+    parser.add_argument('--separate_bones', action='store_true',
+                       help='Export each bone as a separate mesh file (24 bones: pelvis, femur_r/l, tibia_r/l, etc.)')
     parser.add_argument('--visualize', action='store_true',
                        help='Visualize in AITViewer (requires GUI)')
     parser.add_argument('--custom_height', type=float, default=None,
@@ -171,8 +235,31 @@ def main():
                     skel_mesh = skel_mesh.subdivide_loop()
                 print(f'  Subdivided skeleton mesh: {len(skel_mesh.faces):,} faces')
 
+            # Export skin mesh
             skin_mesh.export(skin_path)
-            skel_mesh.export(skel_path)
+
+            # Export skeleton - either as one complete mesh or separate bones
+            if args.separate_bones:
+                print(f'\nSeparating skeleton into individual bones...')
+                bone_meshes = separate_skeleton_by_bone(skel, output)
+
+                bones_dir = os.path.join(output_dir, f'{filename}_bones')
+                os.makedirs(bones_dir, exist_ok=True)
+
+                for bone_name, bone_mesh in bone_meshes.items():
+                    # Apply subdivision to each bone if requested
+                    if args.subdivide > 0:
+                        for _ in range(args.subdivide):
+                            bone_mesh = bone_mesh.subdivide_loop()
+
+                    bone_path = os.path.join(bones_dir, f'{bone_name}.obj')
+                    bone_mesh.export(bone_path)
+
+                print(f'  Exported {len(bone_meshes)} bones to {bones_dir}/')
+                print(f'  Bone names: {", ".join(bone_meshes.keys())}')
+            else:
+                skel_mesh.export(skel_path)
+
             print(f'\nMeshes saved to {output_dir}/')
 
     else:
@@ -214,8 +301,26 @@ def main():
                         skin_mesh = skin_mesh.subdivide_loop()
                         skel_mesh = skel_mesh.subdivide_loop()
 
+                # Export skin mesh
                 skin_mesh.export(skin_path)
-                skel_mesh.export(skel_path)
+
+                # Export skeleton - either as one complete mesh or separate bones
+                if args.separate_bones:
+                    bone_meshes = separate_skeleton_by_bone(skel, output)
+
+                    bones_dir = os.path.join(output_dir, f'{args.gender}_{name}_bones')
+                    os.makedirs(bones_dir, exist_ok=True)
+
+                    for bone_name, bone_mesh in bone_meshes.items():
+                        # Apply subdivision to each bone if requested
+                        if args.subdivide > 0:
+                            for _ in range(args.subdivide):
+                                bone_mesh = bone_mesh.subdivide_loop()
+
+                        bone_path = os.path.join(bones_dir, f'{bone_name}.obj')
+                        bone_mesh.export(bone_path)
+                else:
+                    skel_mesh.export(skel_path)
 
         if args.export_meshes:
             if args.subdivide > 0:

@@ -16,6 +16,12 @@ REM Option 2b: Export with subdivision for higher detail (recommended: --subdivi
 REM Level 1: ~4x faces, Level 2: ~16x faces, Level 3: ~64x faces
 REM uv run python examples/explore_body_shape.py --gender female --export_meshes --subdivide 1
 
+REM Option 2c: Export with each bone as separate mesh (24 bones: pelvis, femur, tibia, etc.)
+REM uv run python examples/explore_body_shape.py --gender female --export_meshes --separate_bones
+
+REM Option 2d: Export with both subdivision and separate bones
+REM uv run python examples/explore_body_shape.py --gender female --export_meshes --subdivide 1 --separate_bones
+
 REM Option 3: Male body shapes
 REM uv run python examples/explore_body_shape.py --gender male --export_meshes
 
