@@ -33,6 +33,7 @@ dependencies = [
   "tqdm",
   "matplotlib",
   "moderngl-window==2.4.6",
+  "nimblephysics==0.10.32",
 ]
 
 [tool.setuptools]
