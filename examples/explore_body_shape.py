@@ -13,14 +13,11 @@ Arguments:
 
 import argparse
 import os
-import sys
 import torch
 from skel.skel_model import SKEL
 from skel.kin_skel import skel_joints_name
 import trimesh
 import numpy as np
-
-import skel.config as cg
 
 # Predefined body shape configurations
 # Format: (name, beta[0](height), beta[1](weight), description)
@@ -42,7 +39,6 @@ BODY_SHAPES = {
     'heavy_tall': (1.5, -1.0, 'Heavy & tall (~90kg, ~175cm)'),
     'very_heavy_tall': (1.5, -2.0, 'Very heavy & tall (~110-130kg, ~175cm)'),
 }
-
 
 def create_body_with_shape(skel_model, beta_height, beta_weight, device='cpu'):
     """
@@ -72,72 +68,66 @@ def create_body_with_shape(skel_model, beta_height, beta_weight, device='cpu'):
 
     return skel_output, betas
 
-
-def compute_per_bone_scale_from_skel(skel_model, betas, device='cpu'):
+def separate_skeleton_by_bone(skel_model, skel_output):
     """
-    Compute per-bone scale factors using SKEL's internal bone scaling logic.
-    Returns a dict {bone_name: np.array([sx, sy, sz])}.
+    Separate skeleton mesh into individual bone meshes based on skinning weights
+
+    Args:
+        skel_model: SKEL model instance
+        skel_output: SKEL model output
+
+    Returns:
+        dict: Dictionary of {bone_name: trimesh.Trimesh} for each bone
     """
-    with torch.no_grad():
-        # Recreate the minimal forward pass pieces needed for scaling
-        B = 1
-        betas_t = betas.to(device)
-        skin_v0 = skel_model.skin_template_v[None, :].to(device)
-        shapedirs = skel_model.shapedirs.view(-1,
-                                              skel_model.num_betas)[None, :].to(device)
-        v_shaped = skin_v0 + \
-            torch.matmul(shapedirs, betas_t[0:1]).view(B, skin_v0.shape[1], 3)
+    skel_verts = skel_output.skel_verts[0].cpu().numpy()  # (Nk, 3)
+    skel_faces = skel_model.skel_f.cpu().numpy()  # (Nf, 3)
 
-        # Joints and bone vectors
-        J = torch.einsum(
-            'bik,ji->bjk', [v_shaped, skel_model.J_regressor_osim])  # BxJx3
-        J_ = J.clone()
-        J_[:, 1:, :] = J[:, 1:, :] - J[:, skel_model.parent, :]
+    # Get skinning weights (Nk vertices x Nj joints)
+    skel_weights = skel_model.skel_weights.to_dense().cpu().numpy()  # (Nk, Nj)
 
-        is_unique_beta = True  # single-shape export
-        bone_scale = skel_model.compute_bone_scale(
-            J_, v_shaped, skin_v0, is_unique_beta)  # BxJx3
+    # For each vertex, find the joint with maximum weight
+    vertex_to_joint = np.argmax(skel_weights, axis=1)  # (Nk,)
 
-    bone_scale_np = bone_scale[0].cpu().numpy()
-    bone_names = skel_joints_name
-    return {bn: bone_scale_np[i] for i, bn in enumerate(bone_names)}
+    bone_meshes = {}
+    num_joints = len(skel_joints_name)
 
+    for joint_idx in range(num_joints):
+        bone_name = skel_joints_name[joint_idx]
 
-def export_geometry_bones(osim_path, bone_scales, output_dir, subdivide=0):
-    """
-    Load per-bone meshes from the OSIM Geometry folder, apply per-bone scaling, and export as OBJ.
-    """
-    # Lazy import to keep SKEL-only path working if smpl2ab isn't installed
-    try:
-        from skel.osim_aug import OsimAug
-    except Exception as e:
-        print(f"WARNING: Failed to import OsimAug for geometry export: {e}")
-        return 0
+        # Find vertices belonging to this bone
+        bone_vert_mask = (vertex_to_joint == joint_idx)
+        bone_vert_indices = np.where(bone_vert_mask)[0]
 
-    oa = OsimAug(osim_path=osim_path)
-    os.makedirs(output_dir, exist_ok=True)
+        if len(bone_vert_indices) == 0:
+            continue  # Skip bones with no vertices
 
-    exported = 0
-    for node_name in oa.node_names:
-        mesh = oa.get_bone_submesh(node_name)
-        if mesh is None:
+        # Find faces where all three vertices belong to this bone
+        face_belongs_to_bone = np.all(bone_vert_mask[skel_faces], axis=1)
+        bone_faces = skel_faces[face_belongs_to_bone]
+
+        if len(bone_faces) == 0:
+            continue  # Skip if no complete faces for this bone
+
+        # Create vertex index mapping (old index -> new index)
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(bone_vert_indices)}
+
+        # Remap face indices to local vertex indices
+        bone_faces_remapped = np.vectorize(old_to_new.get)(bone_faces)
+        bone_verts = skel_verts[bone_vert_indices]
+
+        # Create mesh for this bone
+        try:
+            bone_mesh = trimesh.Trimesh(
+                vertices=bone_verts,
+                faces=bone_faces_remapped,
+                process=False  # Don't merge vertices or clean up
+            )
+            bone_meshes[bone_name] = bone_mesh
+        except:
+            # Skip if mesh creation fails
             continue
-        # Apply per-bone scale if available
-        scale = bone_scales.get(node_name, None)
-        if scale is not None:
-            mesh = mesh.copy()
-            mesh.vertices[:] = mesh.vertices * scale
 
-        # Optional subdivision
-        if subdivide > 0:
-            for _ in range(subdivide):
-                mesh = mesh.subdivide_loop()
-
-        out_path = os.path.join(output_dir, f"{node_name}.obj")
-        mesh.export(out_path)
-        exported += 1
-    return exported
-
+    return bone_meshes
 
 def estimate_body_measurements(skel_output):
     """
@@ -156,12 +146,10 @@ def estimate_body_measurements(skel_output):
 
     # Calculate shoulder width (approximate X-axis shoulder range)
     # Use vertices with Y-coordinate near shoulder
-    # Shoulder is about 30cm below top
-    shoulder_height = vertices[:, 1].max() - 0.3
+    shoulder_height = vertices[:, 1].max() - 0.3  # Shoulder is about 30cm below top
     shoulder_verts = vertices[np.abs(vertices[:, 1] - shoulder_height) < 0.1]
     if len(shoulder_verts) > 0:
-        shoulder_width = shoulder_verts[:,
-                                        0].max() - shoulder_verts[:, 0].min()
+        shoulder_width = shoulder_verts[:, 0].max() - shoulder_verts[:, 0].min()
     else:
         shoulder_width = 0
 
@@ -174,25 +162,23 @@ def estimate_body_measurements(skel_output):
         'arm_span': arm_span,
     }
 
-
 def main():
-    parser = argparse.ArgumentParser(
-        description='Explore SKEL body shape parameters')
+    parser = argparse.ArgumentParser(description='Explore SKEL body shape parameters')
     parser.add_argument('--gender', type=str, default='female', choices=['female', 'male'],
-                        help='Gender')
+                       help='Gender')
     parser.add_argument('--export_meshes', action='store_true',
-                        help='Export mesh files to output/body_shapes/')
+                       help='Export mesh files to output/body_shapes/')
     parser.add_argument('--subdivide', type=int, default=0, choices=[0, 1, 2, 3],
-                        help='Subdivision level for exported meshes (0=no subdivision, 1-3=finer detail). '
-                        'Each level ~4x more faces. Recommended: 1 or 2')
+                       help='Subdivision level for exported meshes (0=no subdivision, 1-3=finer detail). '
+                            'Each level ~4x more faces. Recommended: 1 or 2')
     parser.add_argument('--separate_bones', action='store_true',
-                        help='Export each bone as a separate mesh file (24 bones: pelvis, femur_r/l, tibia_r/l, etc.)')
+                       help='Export each bone as a separate mesh file (24 bones: pelvis, femur_r/l, tibia_r/l, etc.)')
     parser.add_argument('--visualize', action='store_true',
-                        help='Visualize in AITViewer (requires GUI)')
+                       help='Visualize in AITViewer (requires GUI)')
     parser.add_argument('--custom_height', type=float, default=None,
-                        help='Custom height coefficient (beta[0], range -2 to 2)')
+                       help='Custom height coefficient (beta[0], range -2 to 2)')
     parser.add_argument('--custom_weight', type=float, default=None,
-                        help='Custom weight coefficient (beta[1], range -2 to 2)')
+                       help='Custom weight coefficient (beta[1], range -2 to 2)')
 
     args = parser.parse_args()
 
@@ -215,12 +201,9 @@ def main():
         measurements = estimate_body_measurements(output)
 
         print(f'\nEstimated measurements:')
-        print(
-            f'  Height: {measurements["height"]:.3f} m ({measurements["height"]*100:.1f} cm)')
-        print(
-            f'  Shoulder width: {measurements["shoulder_width"]:.3f} m ({measurements["shoulder_width"]*100:.1f} cm)')
-        print(
-            f'  Arm span: {measurements["arm_span"]:.3f} m ({measurements["arm_span"]*100:.1f} cm)')
+        print(f'  Height: {measurements["height"]:.3f} m ({measurements["height"]*100:.1f} cm)')
+        print(f'  Shoulder width: {measurements["shoulder_width"]:.3f} m ({measurements["shoulder_width"]*100:.1f} cm)')
+        print(f'  Arm span: {measurements["arm_span"]:.3f} m ({measurements["arm_span"]*100:.1f} cm)')
 
         if args.export_meshes:
             output_dir = 'output/body_shapes'
@@ -241,34 +224,39 @@ def main():
 
             # Apply subdivision if requested
             if args.subdivide > 0:
-                print(
-                    f'\nApplying Loop subdivision (level {args.subdivide})...')
+                print(f'\nApplying Loop subdivision (level {args.subdivide})...')
                 print(f'  Original skin mesh: {len(skin_mesh.faces):,} faces')
                 for _ in range(args.subdivide):
                     skin_mesh = skin_mesh.subdivide_loop()
-                print(
-                    f'  Subdivided skin mesh: {len(skin_mesh.faces):,} faces')
+                print(f'  Subdivided skin mesh: {len(skin_mesh.faces):,} faces')
 
-                print(
-                    f'  Original skeleton mesh: {len(skel_mesh.faces):,} faces')
+                print(f'  Original skeleton mesh: {len(skel_mesh.faces):,} faces')
                 for _ in range(args.subdivide):
                     skel_mesh = skel_mesh.subdivide_loop()
-                print(
-                    f'  Subdivided skeleton mesh: {len(skel_mesh.faces):,} faces')
+                print(f'  Subdivided skeleton mesh: {len(skel_mesh.faces):,} faces')
 
             # Export skin mesh
             skin_mesh.export(skin_path)
 
             # Export skeleton - either as one complete mesh or separate bones
             if args.separate_bones:
-                print(
-                    f'\nExporting per-bone meshes from Geometry with SKEL-derived scales...')
+                print(f'\nSeparating skeleton into individual bones...')
+                bone_meshes = separate_skeleton_by_bone(skel, output)
+
                 bones_dir = os.path.join(output_dir, f'{filename}_bones')
-                bone_scales = compute_per_bone_scale_from_skel(
-                    skel, betas, device)
-                exported = export_geometry_bones(
-                    cg.osim_model_path, bone_scales, bones_dir, subdivide=args.subdivide)
-                print(f'  Exported {exported} bones to {bones_dir}/')
+                os.makedirs(bones_dir, exist_ok=True)
+
+                for bone_name, bone_mesh in bone_meshes.items():
+                    # Apply subdivision to each bone if requested
+                    if args.subdivide > 0:
+                        for _ in range(args.subdivide):
+                            bone_mesh = bone_mesh.subdivide_loop()
+
+                    bone_path = os.path.join(bones_dir, f'{bone_name}.obj')
+                    bone_mesh.export(bone_path)
+
+                print(f'  Exported {len(bone_meshes)} bones to {bones_dir}/')
+                print(f'  Bone names: {", ".join(bone_meshes.keys())}')
             else:
                 skel_mesh.export(skel_path)
 
@@ -277,8 +265,7 @@ def main():
     else:
         # Generate all predefined body shapes
         print(f'\nGenerating predefined body shape variations...\n')
-        print(
-            f'{"Name":<20} {"Height β":<10} {"Weight β":<10} {"Description":<40} {"Est. Height":<12}')
+        print(f'{"Name":<20} {"Height β":<10} {"Weight β":<10} {"Description":<40} {"Est. Height":<12}')
         print('-' * 100)
 
         outputs = {}
@@ -287,8 +274,7 @@ def main():
             measurements = estimate_body_measurements(output)
 
             height_cm = measurements['height'] * 100
-            print(
-                f'{name:<20} {h:<10.1f} {w:<10.1f} {desc:<40} {height_cm:<12.1f} cm')
+            print(f'{name:<20} {h:<10.1f} {w:<10.1f} {desc:<40} {height_cm:<12.1f} cm')
 
             outputs[name] = output
 
@@ -297,10 +283,8 @@ def main():
                 output_dir = 'output/body_shapes'
                 os.makedirs(output_dir, exist_ok=True)
 
-                skin_path = os.path.join(
-                    output_dir, f'{args.gender}_{name}_skin.obj')
-                skel_path = os.path.join(
-                    output_dir, f'{args.gender}_{name}_skel.obj')
+                skin_path = os.path.join(output_dir, f'{args.gender}_{name}_skin.obj')
+                skel_path = os.path.join(output_dir, f'{args.gender}_{name}_skel.obj')
 
                 skin_mesh = trimesh.Trimesh(
                     vertices=output.skin_verts[0].cpu().numpy(),
@@ -322,20 +306,25 @@ def main():
 
                 # Export skeleton - either as one complete mesh or separate bones
                 if args.separate_bones:
-                    bones_dir = os.path.join(
-                        output_dir, f'{args.gender}_{name}_bones')
-                    bone_scales = compute_per_bone_scale_from_skel(
-                        skel, betas, device)
-                    exported = export_geometry_bones(
-                        cg.osim_model_path, bone_scales, bones_dir, subdivide=args.subdivide)
-                    print(f'Exported {exported} bones to {bones_dir}/')
+                    bone_meshes = separate_skeleton_by_bone(skel, output)
+
+                    bones_dir = os.path.join(output_dir, f'{args.gender}_{name}_bones')
+                    os.makedirs(bones_dir, exist_ok=True)
+
+                    for bone_name, bone_mesh in bone_meshes.items():
+                        # Apply subdivision to each bone if requested
+                        if args.subdivide > 0:
+                            for _ in range(args.subdivide):
+                                bone_mesh = bone_mesh.subdivide_loop()
+
+                        bone_path = os.path.join(bones_dir, f'{bone_name}.obj')
+                        bone_mesh.export(bone_path)
                 else:
                     skel_mesh.export(skel_path)
 
         if args.export_meshes:
             if args.subdivide > 0:
-                print(
-                    f'\nAll meshes exported with Loop subdivision level {args.subdivide} to output/body_shapes/')
+                print(f'\nAll meshes exported with Loop subdivision level {args.subdivide} to output/body_shapes/')
             else:
                 print(f'\nAll meshes saved to output/body_shapes/')
 
@@ -349,8 +338,7 @@ def main():
             v = Viewer()
 
             # Add several representative body shapes to scene
-            representative_shapes = ['very_thin_avg',
-                                     'average', 'heavy_avg', 'very_heavy_avg']
+            representative_shapes = ['very_thin_avg', 'average', 'heavy_avg', 'very_heavy_avg']
             x_offset = 0
 
             for i, name in enumerate(representative_shapes):
@@ -383,9 +371,7 @@ def main():
 
         except ImportError:
             print('\nAITViewer not available, skipping visualization')
-            print(
-                'Tip: Use --export_meshes to export meshes, then view in other software')
-
+            print('Tip: Use --export_meshes to export meshes, then view in other software')
 
 if __name__ == '__main__':
     main()
